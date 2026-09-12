@@ -1,0 +1,23 @@
+[program:comfyui]
+directory=/path/to/ComfyUI
+command=/path/to/conda/envs/ComfyUI/bin/python /path/to/ComfyUI/main.py --listen 0.0.0.0 --port 8188
+
+autostart=true
+autorestart=true
+startsecs=5
+startretries=3
+stopasgroup=true
+killasgroup=true
+stopsignal=TERM
+stopwaitsecs=120
+
+user=your_user
+environment=PYTHONUNBUFFERED="1"
+
+stdout_logfile=/path/to/ComfyUI/output/supervisor/comfyui.stdout.log
+stdout_logfile_maxbytes=50MB
+stdout_logfile_backups=10
+
+stderr_logfile=/path/to/ComfyUI/output/supervisor/comfyui.stderr.log
+stderr_logfile_maxbytes=50MB
+stderr_logfile_backups=10

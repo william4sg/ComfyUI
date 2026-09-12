@@ -186,6 +186,49 @@ pip install comfy-cli
 comfy install
 ```
 
+## Running ComfyUI with Supervisor
+
+If you want ComfyUI to keep running after you close the terminal, you can run it under [Supervisor](http://supervisord.org/).
+
+An example configuration is available at:
+
+`script_examples/supervisord_comfyui.conf.example`
+
+Update the following fields before using it:
+
+- `directory`
+- `command`
+- `user`
+- `stdout_logfile`
+- `stderr_logfile`
+
+The example uses the Python executable inside your ComfyUI environment directly instead of `conda run`, which is more reliable for long-running Supervisor-managed processes.
+
+Typical usage:
+
+```bash
+mkdir -p /path/to/ComfyUI/output/supervisor
+supervisord -c /etc/supervisord.conf
+supervisorctl reread
+supervisorctl update
+supervisorctl status comfyui
+```
+
+### One-click deploy for Amazon Linux 2023
+
+For Amazon Linux 2023, this repository also includes a bootstrap script that installs Miniconda, creates a `ComfyUI` conda environment with Python 3.10, installs Python dependencies, writes Supervisor config, registers `supervisord` with `systemd`, and starts ComfyUI:
+
+```bash
+sudo bash script_examples/deploy_amazon_linux_2023_supervisor.sh \
+  --service-user ec2-user \
+  --listen 0.0.0.0 \
+  --port 8188
+```
+
+The script assumes an `x86_64` Amazon Linux 2023 host and uses the default Miniconda installer for that architecture.
+
+If your repository is not located at the current working tree path on the server, pass `--project-dir /path/to/ComfyUI`.
+
 ## Manual Install (Windows, Linux)
 
 Python 3.14 works but some custom nodes may have issues. The free threaded variant works but some dependencies will enable the GIL so it's not fully supported.
