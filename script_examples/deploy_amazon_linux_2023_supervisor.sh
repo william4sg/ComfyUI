@@ -144,6 +144,9 @@ prepare_runtime_dirs() {
     install -d -m 0755 -o "${SERVICE_USER}" -g "${SERVICE_USER}" "${PROJECT_DIR}/temp"
     install -d -m 0755 -o "${SERVICE_USER}" -g "${SERVICE_USER}" "${PROJECT_DIR}/user"
     install -d -m 0755 "${SUPERVISOR_CONFIG_DIR}"
+    # supervisord 要求 childlogdir 预先存在，否则主进程启动失败，后续
+    # supervisorctl 会因为找不到 unix socket 报 FileNotFoundError。
+    install -d -m 0755 /var/log/supervisor
 }
 
 write_supervisor_main_config() {
@@ -226,6 +229,12 @@ start_services() {
     echo "==> 启动 supervisord 并加载 ${SERVICE_NAME}"
     systemctl daemon-reload
     systemctl enable --now supervisord
+    if ! systemctl is-active --quiet supervisord; then
+        echo "supervisord 启动失败，请检查以下信息：" >&2
+        systemctl status supervisord --no-pager || true
+        journalctl -u supervisord -n 50 --no-pager || true
+        exit 1
+    fi
     /usr/local/bin/supervisorctl -c "${SUPERVISOR_MAIN_CONFIG}" reread
     /usr/local/bin/supervisorctl -c "${SUPERVISOR_MAIN_CONFIG}" update
     /usr/local/bin/supervisorctl -c "${SUPERVISOR_MAIN_CONFIG}" restart "${SERVICE_NAME}" || true
