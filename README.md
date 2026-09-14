@@ -192,7 +192,7 @@ If you want ComfyUI to keep running after you close the terminal, you can run it
 
 An example configuration is available at:
 
-`script_examples/supervisord_comfyui.conf.example`
+`deploy/supervisord_comfyui.conf.example`
 
 Update the following fields before using it:
 
@@ -216,10 +216,10 @@ supervisorctl status comfyui
 
 ### One-click deploy for Amazon Linux 2023
 
-For Amazon Linux 2023, this repository also includes a bootstrap script that installs Miniconda, creates a `ComfyUI` conda environment with Python 3.10, installs Python dependencies, writes Supervisor config, registers `supervisord` with `systemd`, and starts ComfyUI:
+For Amazon Linux 2023, this repository also includes a bootstrap script that installs Miniconda, creates a `ComfyUI` conda environment with Python 3.10, installs Python dependencies including ComfyUI-Manager, writes Supervisor config, registers `supervisord` with `systemd`, and starts ComfyUI with `--enable-manager`:
 
 ```bash
-sudo bash script_examples/deploy_amazon_linux_2023_supervisor.sh \
+sudo bash deploy/deploy_amazon_linux_2023_supervisor.sh \
   --service-user ec2-user \
   --listen 0.0.0.0 \
   --port 8188

@@ -14,12 +14,15 @@ MINICONDA_DIR="/opt/miniconda3"
 SUPERVISOR_CONFIG_DIR="/etc/supervisord.d"
 SUPERVISOR_MAIN_CONFIG="/etc/supervisord.conf"
 SYSTEMD_UNIT_PATH="/etc/systemd/system/supervisord.service"
+SUPERVISOR_SOCKET="/var/run/supervisor.sock"
 LOG_DIR="${PROJECT_DIR}/output/supervisor"
+SUPERVISORD_BIN=""
+SUPERVISORCTL_BIN=""
 
 usage() {
     cat <<EOF
 用法:
-  sudo bash script_examples/deploy_amazon_linux_2023_supervisor.sh [选项]
+  sudo bash deploy/deploy_amazon_linux_2023_supervisor.sh [选项]
 
 选项:
   --project-dir PATH        ComfyUI 项目目录，默认当前仓库根目录
@@ -103,7 +106,7 @@ check_inputs() {
 
 install_system_packages() {
     echo "==> 安装系统依赖"
-    dnf install -y wget bzip2 tar gzip git python3 python3-pip
+    dnf install -y wget bzip2 tar gzip git iproute python3 python3-pip
 }
 
 install_miniconda() {
@@ -132,8 +135,22 @@ ensure_conda_env() {
 install_python_dependencies() {
     echo "==> 安装 Python 依赖"
     "${CONDA_BIN}" run -p "${CONDA_ENV_PATH}" python -m pip install --upgrade pip
-    "${CONDA_BIN}" run -p "${CONDA_ENV_PATH}" python -m pip install -r "${PROJECT_DIR}/requirements.txt"
+    # 每次部署都强制重装依赖，避免环境里残留旧版本或本地改动导致实际运行依赖漂移。
+    "${CONDA_BIN}" run -p "${CONDA_ENV_PATH}" python -m pip install --upgrade --force-reinstall -r "${PROJECT_DIR}/requirements.txt"
+    # 部署脚本默认启用 manager，因此这里也按相同策略强制重装它的依赖，保持环境一致。
+    "${CONDA_BIN}" run -p "${CONDA_ENV_PATH}" python -m pip install --upgrade --force-reinstall -r "${PROJECT_DIR}/manager_requirements.txt"
     python3 -m pip install --upgrade supervisor
+}
+
+ensure_supervisor_binaries() {
+    SUPERVISORD_BIN="$(command -v supervisord || true)"
+    SUPERVISORCTL_BIN="$(command -v supervisorctl || true)"
+
+    if [[ -z "${SUPERVISORD_BIN}" || -z "${SUPERVISORCTL_BIN}" ]]; then
+        echo "未找到 supervisord 或 supervisorctl，可执行文件安装位置与当前环境不一致。" >&2
+        echo "请检查 python3 -m pip install --upgrade supervisor 是否成功执行。" >&2
+        exit 1
+    fi
 }
 
 prepare_runtime_dirs() {
@@ -157,7 +174,7 @@ write_supervisor_main_config() {
     echo "==> 生成 ${SUPERVISOR_MAIN_CONFIG}"
     cat > "${SUPERVISOR_MAIN_CONFIG}" <<EOF
 [unix_http_server]
-file=/var/run/supervisor.sock
+file=${SUPERVISOR_SOCKET}
 chmod=0700
 
 [supervisord]
@@ -169,11 +186,32 @@ childlogdir=/var/log/supervisor
 supervisor.rpcinterface_factory = supervisor.rpcinterface:make_main_rpcinterface
 
 [supervisorctl]
-serverurl=unix:///var/run/supervisor.sock
+serverurl=unix://${SUPERVISOR_SOCKET}
 
 [include]
 files = ${SUPERVISOR_CONFIG_DIR}/*.conf
 EOF
+}
+
+validate_supervisor_main_config() {
+    if [[ ! -f "${SUPERVISOR_MAIN_CONFIG}" ]]; then
+        return
+    fi
+
+    if ! grep -Fqx "file=${SUPERVISOR_SOCKET}" "${SUPERVISOR_MAIN_CONFIG}"; then
+        echo "${SUPERVISOR_MAIN_CONFIG} 缺少 unix_http_server socket 配置，当前脚本无法安全复用该配置。" >&2
+        exit 1
+    fi
+
+    if ! grep -Fqx "serverurl=unix://${SUPERVISOR_SOCKET}" "${SUPERVISOR_MAIN_CONFIG}"; then
+        echo "${SUPERVISOR_MAIN_CONFIG} 缺少 supervisorctl socket 配置，当前脚本无法安全复用该配置。" >&2
+        exit 1
+    fi
+
+    if ! grep -Fqx "files = ${SUPERVISOR_CONFIG_DIR}/*.conf" "${SUPERVISOR_MAIN_CONFIG}"; then
+        echo "${SUPERVISOR_MAIN_CONFIG} 没有包含 ${SUPERVISOR_CONFIG_DIR}/*.conf，当前脚本生成的服务配置不会生效。" >&2
+        exit 1
+    fi
 }
 
 write_supervisor_program_config() {
@@ -181,7 +219,7 @@ write_supervisor_program_config() {
     cat > "${SUPERVISOR_PROGRAM_CONFIG}" <<EOF
 [program:${SERVICE_NAME}]
 directory=${PROJECT_DIR}
-command=${COMFY_PYTHON} ${PROJECT_DIR}/main.py --listen ${LISTEN_HOST} --port ${PORT}
+command=${COMFY_PYTHON} ${PROJECT_DIR}/main.py --listen ${LISTEN_HOST} --port ${PORT} --enable-manager
 user=${SERVICE_USER}
 
 autostart=true
@@ -214,9 +252,9 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/supervisord -n -c ${SUPERVISOR_MAIN_CONFIG}
-ExecStop=/usr/local/bin/supervisorctl -c ${SUPERVISOR_MAIN_CONFIG} shutdown
-ExecReload=/usr/local/bin/supervisorctl -c ${SUPERVISOR_MAIN_CONFIG} reload
+ExecStart=${SUPERVISORD_BIN} -n -c ${SUPERVISOR_MAIN_CONFIG}
+ExecStop=${SUPERVISORCTL_BIN} -c ${SUPERVISOR_MAIN_CONFIG} shutdown
+ExecReload=${SUPERVISORCTL_BIN} -c ${SUPERVISOR_MAIN_CONFIG} reload
 Restart=always
 RestartSec=3
 
@@ -235,10 +273,44 @@ start_services() {
         journalctl -u supervisord -n 50 --no-pager || true
         exit 1
     fi
-    /usr/local/bin/supervisorctl -c "${SUPERVISOR_MAIN_CONFIG}" reread
-    /usr/local/bin/supervisorctl -c "${SUPERVISOR_MAIN_CONFIG}" update
-    /usr/local/bin/supervisorctl -c "${SUPERVISOR_MAIN_CONFIG}" restart "${SERVICE_NAME}" || true
-    /usr/local/bin/supervisorctl -c "${SUPERVISOR_MAIN_CONFIG}" status "${SERVICE_NAME}"
+    "${SUPERVISORCTL_BIN}" -c "${SUPERVISOR_MAIN_CONFIG}" reread
+    # 先停掉旧的 supervisor 进程实例，避免同名服务在配置更新期间残留旧进程。
+    "${SUPERVISORCTL_BIN}" -c "${SUPERVISOR_MAIN_CONFIG}" stop "${SERVICE_NAME}" || true
+    "${SUPERVISORCTL_BIN}" -c "${SUPERVISOR_MAIN_CONFIG}" update
+    # 如果端口上还有手工启动或异常残留的旧进程，这里兜底清掉，避免新实例启动时报地址已被占用。
+    local port_pids
+    port_pids="$(ss -ltnp "( sport = :${PORT} )" 2>/dev/null | grep -o 'pid=[0-9]\+' | cut -d= -f2 | sort -u || true)"
+    if [[ -n "${port_pids}" ]]; then
+        echo "==> 检查占用端口 ${PORT} 的旧进程"
+        while IFS= read -r pid; do
+            [[ -n "${pid}" ]] || continue
+            local process_info
+            local process_user
+            local process_command
+            process_info="$(ps -o user= -o command= -p "${pid}" 2>/dev/null || true)"
+            process_user="${process_info%% *}"
+            process_command="${process_info#* }"
+
+            if [[ "${process_user}" == "${SERVICE_USER}" && "${process_command}" == *"${PROJECT_DIR}/main.py"* ]]; then
+                echo "==> 清理 ComfyUI 旧进程: pid=${pid}"
+                kill "${pid}" || true
+                continue
+            fi
+
+            echo "端口 ${PORT} 被非 ComfyUI 进程占用，已停止部署以避免误杀。" >&2
+            echo "占用进程: pid=${pid} user=${process_user} command=${process_command}" >&2
+            exit 1
+        done <<< "${port_pids}"
+    fi
+    "${SUPERVISORCTL_BIN}" -c "${SUPERVISOR_MAIN_CONFIG}" start "${SERVICE_NAME}"
+
+    local service_status
+    service_status="$("${SUPERVISORCTL_BIN}" -c "${SUPERVISOR_MAIN_CONFIG}" status "${SERVICE_NAME}")"
+    echo "${service_status}"
+    if [[ "${service_status}" != *" RUNNING "* && "${service_status}" != *" RUNNING" ]]; then
+        echo "ComfyUI 服务未进入 RUNNING 状态，请检查日志。" >&2
+        exit 1
+    fi
 }
 
 print_summary() {
@@ -267,7 +339,9 @@ main() {
     install_miniconda
     ensure_conda_env
     install_python_dependencies
+    ensure_supervisor_binaries
     prepare_runtime_dirs
+    validate_supervisor_main_config
     write_supervisor_main_config
     write_supervisor_program_config
     write_systemd_unit
