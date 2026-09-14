@@ -106,7 +106,7 @@ def queue_prompt(prompt):
     # Generate a key here: https://platform.comfy.org/login
 
     data = json.dumps(p).encode('utf-8')
-    req =  request.Request("http://127.0.0.1:8188/prompt", data=data)
+    req =  request.Request("http://127.0.0.1:8000/prompt", data=data)
     request.urlopen(req)
 
 
@@ -119,5 +119,4 @@ prompt["3"]["inputs"]["seed"] = 5
 
 
 queue_prompt(prompt)
-
 

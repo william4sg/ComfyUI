@@ -1,6 +1,6 @@
 [program:comfyui]
 directory=/path/to/ComfyUI
-command=/path/to/conda/envs/ComfyUI/bin/python /path/to/ComfyUI/main.py --listen 0.0.0.0 --port 8188 --enable-manager
+command=/path/to/conda/envs/ComfyUI/bin/python /path/to/ComfyUI/main.py --listen 0.0.0.0 --port 8000 --enable-manager
 
 autostart=true
 autorestart=true

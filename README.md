@@ -222,7 +222,7 @@ For Amazon Linux 2023, this repository also includes a bootstrap script that ins
 sudo bash deploy/deploy_amazon_linux_2023_supervisor.sh \
   --service-user ec2-user \
   --listen 0.0.0.0 \
-  --port 8188
+  --port 8000
 ```
 
 The script assumes an `x86_64` Amazon Linux 2023 host and uses the default Miniconda installer for that architecture.

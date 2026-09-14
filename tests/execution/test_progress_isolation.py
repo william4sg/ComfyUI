@@ -50,7 +50,7 @@ class IsolatedClient(ComfyClient):
         self.progress_tracker = None
         self.all_messages: List[Dict[str, Any]] = []
 
-    def connect(self, listen='127.0.0.1', port=8188, client_id=None):
+    def connect(self, listen='127.0.0.1', port=8000, client_id=None):
         """Connect with a specific client_id and set up message tracking."""
         if client_id is None:
             client_id = str(uuid.uuid4())
@@ -230,4 +230,3 @@ class TestProgressIsolation:
         finally:
             if hasattr(client, 'ws'):
                 client.ws.close()
-

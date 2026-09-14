@@ -7,7 +7,7 @@ import json
 import urllib.request
 import urllib.parse
 
-server_address = "127.0.0.1:8188"
+server_address = "127.0.0.1:8000"
 client_id = str(uuid.uuid4())
 
 def queue_prompt(prompt):
@@ -156,4 +156,3 @@ ws.close() # for in case this example is used in an environment where it will be
 #         import io
 #         image = Image.open(io.BytesIO(image_data))
 #         image.show()
-

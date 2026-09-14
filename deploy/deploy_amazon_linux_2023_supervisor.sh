@@ -8,7 +8,7 @@ PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 SERVICE_NAME="comfyui"
 SERVICE_USER="ec2-user"
 LISTEN_HOST="0.0.0.0"
-PORT="8188"
+PORT="8000"
 CONDA_ENV_NAME="ComfyUI"
 MINICONDA_DIR="/opt/miniconda3"
 SUPERVISOR_CONFIG_DIR="/etc/supervisord.d"
@@ -28,7 +28,7 @@ usage() {
   --project-dir PATH        ComfyUI 项目目录，默认当前仓库根目录
   --service-user USER       运行服务的系统用户，默认 ec2-user
   --listen HOST             监听地址，默认 0.0.0.0
-  --port PORT               监听端口，默认 8188
+  --port PORT               监听端口，默认 8000
   --conda-env-name NAME     conda 环境名，默认 ComfyUI
   --miniconda-dir PATH      Miniconda 安装目录，默认 /opt/miniconda3
   --service-name NAME       supervisor 程序名，默认 comfyui
@@ -302,15 +302,32 @@ start_services() {
             exit 1
         done <<< "${port_pids}"
     fi
-    "${SUPERVISORCTL_BIN}" -c "${SUPERVISOR_MAIN_CONFIG}" start "${SERVICE_NAME}"
 
     local service_status
     service_status="$("${SUPERVISORCTL_BIN}" -c "${SUPERVISOR_MAIN_CONFIG}" status "${SERVICE_NAME}")"
-    echo "${service_status}"
-    if [[ "${service_status}" != *" RUNNING "* && "${service_status}" != *" RUNNING" ]]; then
-        echo "ComfyUI 服务未进入 RUNNING 状态，请检查日志。" >&2
-        exit 1
+    if [[ "${service_status}" != *" RUNNING "* && "${service_status}" != *" RUNNING" && "${service_status}" != *" STARTING "* && "${service_status}" != *" STARTING" ]]; then
+        "${SUPERVISORCTL_BIN}" -c "${SUPERVISOR_MAIN_CONFIG}" start "${SERVICE_NAME}"
     fi
+
+    local attempt
+    for attempt in 1 2 3 4 5 6 7 8 9 10; do
+        service_status="$("${SUPERVISORCTL_BIN}" -c "${SUPERVISOR_MAIN_CONFIG}" status "${SERVICE_NAME}")"
+        echo "${service_status}"
+
+        if [[ "${service_status}" == *" RUNNING "* || "${service_status}" == *" RUNNING" ]]; then
+            return
+        fi
+
+        if [[ "${service_status}" != *" STARTING "* && "${service_status}" != *" STARTING" ]]; then
+            echo "ComfyUI 服务启动失败，请检查日志。" >&2
+            exit 1
+        fi
+
+        sleep 3
+    done
+
+    echo "ComfyUI 服务长时间停留在 STARTING 状态，请检查日志。" >&2
+    exit 1
 }
 
 print_summary() {
